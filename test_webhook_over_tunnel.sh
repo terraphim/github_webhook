@@ -2,7 +2,12 @@
 
 # Base URL
 URL="https://rare-prep-major-dining.trycloudflare.com/webhook"
-SECRET="secret"
+# Read secret from environment variable
+if [ -z "$GITHUB_WEBHOOK_SECRET" ]; then
+    echo "Error: GITHUB_WEBHOOK_SECRET environment variable is not set"
+    exit 1
+fi
+SECRET="$GITHUB_WEBHOOK_SECRET"
 
 # Test payload
 PAYLOAD='{"action":"opened","number":1,"pull_request":{"title":"Test PR","html_url":"https://github.com/user/repo/pull/1"}}'

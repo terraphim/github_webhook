@@ -81,3 +81,13 @@ Run the tests:
 ```bash
 cargo test
 ```
+
+To run with 1password cli: 
+```bash
+op run --env-file demo.env -- cargo run
+```
+
+To run with 1password cli and test webhook over tunnel: 
+```bash
+op run --env-file demo.env -- ./test_webhook_over_tunnel.sh
+```
