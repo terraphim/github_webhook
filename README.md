@@ -59,7 +59,7 @@ cloudflared tunnel --url http://localhost:3000
    - Payload URL: Your Cloudflare tunnel URL + `/webhook` (e.g., `https://your-tunnel.trycloudflare.com/webhook`)
    - Content type: `application/json`
    - Secret: Same value as your `GITHUB_WEBHOOK_SECRET`
-   - Events: Select "Pull requests"
+   - Events: Select "Let me select individual events." then  "Pull requests"
    - Active: Check this box
 
 4. Click "Add webhook"
