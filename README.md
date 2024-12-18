@@ -34,6 +34,47 @@ curl -X POST http://localhost:3000/webhook \
 -d '{"action":"opened","number":1,"pull_request":{"title":"Test PR","html_url":"https://github.com/user/repo/pull/1"}}'
 ```
 
+## Testing with GitHub
+
+### Local Testing with Cloudflare Tunnel
+1. Install Cloudflare CLI tool:
+```bash
+brew install cloudflare/cloudflare/cloudflared  # macOS
+# or
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb  # Linux
+```
+
+2. Create a tunnel to expose your local server:
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+3. Copy the generated URL (like `https://your-tunnel.trycloudflare.com`)
+
+### Configure GitHub Webhook
+1. Go to your GitHub repository
+2. Navigate to Settings > Webhooks > Add webhook
+3. Configure the webhook:
+   - Payload URL: Your Cloudflare tunnel URL + `/webhook` (e.g., `https://your-tunnel.trycloudflare.com/webhook`)
+   - Content type: `application/json`
+   - Secret: Same value as your `GITHUB_WEBHOOK_SECRET`
+   - Events: Select "Pull requests"
+   - Active: Check this box
+
+4. Click "Add webhook"
+
+Now when you:
+- Create a new PR
+- Update an existing PR
+GitHub will send webhooks to your local server through the Cloudflare tunnel.
+
+### Manual Testing
+You can still use the test script for local testing:
+```bash
+./test_webhook.sh
+```
+
 ## Testing
 
 Run the tests:

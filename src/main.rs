@@ -7,17 +7,25 @@ use std::env;
 use async_process::Command;
 use tracing::{info, error};
 
+/// PullRequest { action: "closed", number: 1, pull_request: PullRequestDetails { title: "Update README.md", html_url: "https://github.com/AlexMikhalev/test-webhook/pull/1" } }
 #[derive(Debug, Deserialize)]
-struct PullRequest {
+#[serde(rename_all = "snake_case")]
+struct GitHubWebhook {
+    #[serde(default)]
     action: String,
+    #[serde(default)]
     number: i64,
-    pull_request: PullRequestDetails,
+    pull_request: Option<PullRequestDetails>,
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PullRequestDetails {
     title: String,
     html_url: String,
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,7 +53,7 @@ async fn execute_script(pr_number: i64, pr_title: &str, pr_url: &str) -> Result<
         .arg(pr_url)
         .output()
         .await?;
-    
+    println!("output: {:?}", output);
     if !output.status.success() {
         let error_message = String::from_utf8_lossy(&output.stderr);
         error!("Script execution failed: {}", error_message);
@@ -94,19 +102,19 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
         }
     }
 
-    let pull_request: PullRequest = match serde_json::from_slice(&body) {
+    let pull_request: GitHubWebhook = match serde_json::from_slice(&body) {
         Ok(pr) => pr,
         Err(e) => {
             error!("Failed to parse webhook payload: {}", e);
             return Err(StatusError::bad_request());
         }
     };
-
+    println!("pull_request: {:?}", pull_request);
     if pull_request.action == "opened" || pull_request.action == "synchronize" {
         match execute_script(
             pull_request.number,
-            &pull_request.pull_request.title,
-            &pull_request.pull_request.html_url
+            &pull_request.pull_request.as_ref().unwrap().title,
+            &pull_request.pull_request.as_ref().unwrap().html_url
         ).await {
             Ok(_) => {
                 let response = WebhookResponse {
@@ -121,6 +129,8 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
             }
         }
     }
+
+    info!("Received webhook payload: {}", String::from_utf8_lossy(&body));
 
     Ok(())
 }
