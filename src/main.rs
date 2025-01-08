@@ -1,5 +1,5 @@
 use anyhow::Result;
-use async_process::Command;
+use async_process::Command as AsyncCommand;
 use hmac::{Hmac, Mac};
 use octocrab::Octocrab;
 use salvo::prelude::*;
@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::env;
 use tracing::{error, info};
+use clap::{Command, Arg, ArgAction};
+
+// Include the built info module
+mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
 
 /// PullRequest { action: "closed", number: 1, pull_request: PullRequestDetails { title: "Update README.md", html_url: "https://github.com/AlexMikhalev/test-webhook/pull/1" } }
 #[derive(Debug, Deserialize)]
@@ -85,7 +91,7 @@ async fn post_pr_comment(pr_number: i64, comment: &str, repo_full_name: &str) ->
 async fn execute_script(pr_number: i64, pr_title: &str, pr_url: &str) -> Result<String> {
     let script_path = env::var("WEBHOOK_SCRIPT").unwrap_or_else(|_| "./pr_script.sh".to_string());
 
-    let output = Command::new(&script_path)
+    let output = AsyncCommand::new(&script_path)
         .arg(pr_number.to_string())
         .arg(pr_title)
         .arg(pr_url)
@@ -111,6 +117,7 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
     let github_secret = match env::var("GITHUB_WEBHOOK_SECRET") {
         Ok(secret) => secret,
         Err(_) => {
+            println!("GITHUB_WEBHOOK_SECRET environment variable not set");
             error!("GITHUB_WEBHOOK_SECRET environment variable not set");
             return Err(StatusError::internal_server_error());
         }
@@ -202,8 +209,23 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
 
-    let router = Router::new().push(Router::with_path("webhook").post(handle_webhook));
+    let matches = Command::new("github_webhook")
+        .version(built_info::PKG_VERSION)
+        .arg(
+            Arg::new("show-version")
+                .short('v')
+                .long("show-version")
+                .action(ArgAction::SetTrue)
+                .help("Prints version information")
+        )
+        .get_matches();
 
+    if matches.get_flag("show-version") {
+        println!("{} version {}", built_info::PKG_NAME, built_info::PKG_VERSION);
+        return Ok(());
+    }
+
+    let router = Router::new().push(Router::with_path("webhook").post(handle_webhook));
     let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("127.0.0.1:{}", port);
 
