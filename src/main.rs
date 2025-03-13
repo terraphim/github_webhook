@@ -163,43 +163,70 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
         }
     };
     println!("pull_request: {:?}", pull_request);
+    
     if pull_request.action == "opened" || pull_request.action == "synchronize" {
-        match execute_script(
-            pull_request.number,
-            &pull_request.pull_request.as_ref().unwrap().title,
-            &pull_request.pull_request.as_ref().unwrap().html_url,
-        )
-        .await
-        {
-            Ok(output) => {
-                let comment = format!("Script execution results:\n```\n{}\n```", output);
-
-                if let Some(repo) = &pull_request.repository {
-                    if let Err(e) =
-                        post_pr_comment(pull_request.number, &comment, &repo.full_name).await
-                    {
-                        error!("Failed to post comment: {}", e);
+        // Clone the necessary data for the spawned task
+        let pr_number = pull_request.number;
+        let pr_title = pull_request.pull_request.as_ref()
+            .map(|pr| pr.title.clone())
+            .unwrap_or_default();
+        let pr_url = pull_request.pull_request.as_ref()
+            .map(|pr| pr.html_url.clone())
+            .unwrap_or_default();
+        let repo_full_name = pull_request.repository.as_ref()
+            .map(|repo| repo.full_name.clone())
+            .unwrap_or_default();
+        
+        // Spawn the script execution in a separate Tokio task
+        tokio::task::spawn(async move {
+            info!("Starting background script execution for PR #{}", pr_number);
+            
+            match execute_script(pr_number, &pr_title, &pr_url).await {
+                Ok(output) => {
+                    let comment = format!("Script execution results:\n```\n{}\n```", output);
+                    
+                    if !repo_full_name.is_empty() {
+                        if let Err(e) = post_pr_comment(pr_number, &comment, &repo_full_name).await {
+                            error!("Failed to post comment: {}", e);
+                        } else {
+                            info!("Successfully posted comment to PR #{}", pr_number);
+                        }
+                    } else {
+                        error!("Repository information not found in webhook payload");
                     }
-                } else {
-                    error!("Repository information not found in webhook payload");
                 }
-
-                let response = WebhookResponse {
-                    message: "Webhook processed successfully".to_string(),
-                    status: "success".to_string(),
-                };
-                res.render(Json(response));
+                Err(e) => {
+                    error!("Background script execution failed: {}", e);
+                    
+                    // Optionally post error comment to PR
+                    if !repo_full_name.is_empty() {
+                        let error_comment = format!("Script execution failed:\n```\n{}\n```", e);
+                        if let Err(e) = post_pr_comment(pr_number, &error_comment, &repo_full_name).await {
+                            error!("Failed to post error comment: {}", e);
+                        }
+                    }
+                }
             }
-            Err(e) => {
-                error!("Script execution failed: {}", e);
-                return Err(StatusError::internal_server_error());
-            }
-        }
+        });
+        
+        // Return success response immediately
+        let response = WebhookResponse {
+            message: "Webhook received and processing started in background".to_string(),
+            status: "success".to_string(),
+        };
+        res.render(Json(response));
+    } else {
+        // For other actions, just acknowledge receipt
+        let response = WebhookResponse {
+            message: "Webhook received but no action taken for this event type".to_string(),
+            status: "success".to_string(),
+        };
+        res.render(Json(response));
     }
 
     info!(
-        "Received webhook payload: {}",
-        String::from_utf8_lossy(body)
+        "Processed webhook payload: action={}, pr={}",
+        pull_request.action, pull_request.number
     );
 
     Ok(())
