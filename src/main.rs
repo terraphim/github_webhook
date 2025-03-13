@@ -1,5 +1,4 @@
 use anyhow::Result;
-use async_process::Command as AsyncCommand;
 use hmac::{Hmac, Mac};
 use octocrab::Octocrab;
 use salvo::prelude::*;
@@ -90,14 +89,27 @@ async fn post_pr_comment(pr_number: i64, comment: &str, repo_full_name: &str) ->
 
 async fn execute_script(pr_number: i64, pr_title: &str, pr_url: &str) -> Result<String> {
     let script_path = env::var("WEBHOOK_SCRIPT").unwrap_or_else(|_| "./pr_script.sh".to_string());
+    
+    // Clone the string references to own them before moving into the closure
+    let pr_title = pr_title.to_string();
+    let pr_url = pr_url.to_string();
+    let script_path_clone = script_path.clone();
+    
+    // Run the script in a blocking thread pool
+    let output = tokio::task::spawn_blocking(move || {
+        info!("Executing script in blocking thread: {}", script_path_clone);
+        
+        // Use std::process::Command for synchronous execution in the blocking thread
+        std::process::Command::new(&script_path_clone)
+            .arg(pr_number.to_string())
+            .arg(pr_title)
+            .arg(pr_url)
+            .output()
+    }).await?;
 
-    let output = AsyncCommand::new(&script_path)
-        .arg(pr_number.to_string())
-        .arg(pr_title)
-        .arg(pr_url)
-        .output()
-        .await?;
-
+    // Process the output
+    let output = output?;
+    
     if !output.status.success() {
         let error_message = String::from_utf8_lossy(&output.stderr);
         error!("Script execution failed: {}", error_message);
@@ -177,10 +189,8 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
             .map(|repo| repo.full_name.clone())
             .unwrap_or_default();
         
-        // Spawn the script execution in a separate Tokio task
-        tokio::task::spawn(async move {
-            info!("Starting background script execution for PR #{}", pr_number);
-            
+        // Spawn a task to handle the script execution and comment posting
+        tokio::spawn(async move {
             match execute_script(pr_number, &pr_title, &pr_url).await {
                 Ok(output) => {
                     let comment = format!("Script execution results:\n```\n{}\n```", output);
@@ -196,7 +206,7 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
                     }
                 }
                 Err(e) => {
-                    error!("Background script execution failed: {}", e);
+                    error!("Script execution failed: {}", e);
                     
                     // Optionally post error comment to PR
                     if !repo_full_name.is_empty() {
@@ -211,7 +221,7 @@ async fn handle_webhook(req: &mut Request, res: &mut Response) -> Result<(), Sta
         
         // Return success response immediately
         let response = WebhookResponse {
-            message: "Webhook received and processing started in background".to_string(),
+            message: "Webhook received and processing started".to_string(),
             status: "success".to_string(),
         };
         res.render(Json(response));
